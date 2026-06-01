@@ -45,6 +45,7 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+    command: sh -c "npx prisma migrate deploy && npm run start:dev"
     environment:
       NODE_ENV: development
       PORT: 4000
@@ -54,7 +55,7 @@ services:
       JWT_REFRESH_SECRET: ${JWT_REFRESH_SECRET:-dev_refresh_secret_change_me}
       JWT_ACCESS_TTL: 15m
       JWT_REFRESH_TTL: 7d
-      SUPABASE_URL: ${SUPABASE_URL:-}
+      SUPABASE_URL: ${SUPABASE_URL:-https://placeholder.supabase.co}
       SUPABASE_SERVICE_ROLE_KEY: ${SUPABASE_SERVICE_ROLE_KEY:-}
       WHATSAPP_TOKEN: ${WHATSAPP_TOKEN:-}
       WHATSAPP_PHONE_ID: ${WHATSAPP_PHONE_ID:-}
