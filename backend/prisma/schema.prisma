@@ -1,0 +1,388 @@
+// =============================================================================
+// Autos Quito CRM - Prisma Schema
+// Backend: NestJS  | DB: PostgreSQL (Supabase)
+// =============================================================================
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============================ ENUMS ============================
+
+enum UserRole {
+  ADMIN
+  GERENCIA
+  SUPERVISOR
+  ASESOR
+}
+
+enum LeadStatus {
+  NEW
+  TRIAGE
+  QUALIFIED
+  APPOINTMENT
+  NEGOTIATION
+  WON
+  LOST
+}
+
+enum LeadSource {
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK
+  WEB
+  REFERRAL
+  WALK_IN
+  PHONE
+  OTHER
+}
+
+enum LeadPriority {
+  LOW
+  MEDIUM
+  HIGH
+  URGENT
+}
+
+enum ChannelType {
+  WHATSAPP
+  INSTAGRAM
+  FACEBOOK
+  WEB_CHAT
+  EMAIL
+}
+
+enum MessageDirection {
+  INBOUND
+  OUTBOUND
+}
+
+enum MessageStatus {
+  PENDING
+  SENT
+  DELIVERED
+  READ
+  FAILED
+}
+
+enum MessageType {
+  TEXT
+  IMAGE
+  VIDEO
+  AUDIO
+  DOCUMENT
+  LOCATION
+  TEMPLATE
+  INTERACTIVE
+  SYSTEM
+}
+
+enum ActivityType {
+  CALL
+  EMAIL
+  WHATSAPP
+  VISIT
+  MEETING
+  NOTE
+  TASK
+  STAGE_CHANGE
+  ASSIGNMENT
+}
+
+enum NotificationType {
+  LEAD_ASSIGNED
+  NEW_MESSAGE
+  STAGE_CHANGED
+  TASK_DUE
+  APPOINTMENT_REMINDER
+  SYSTEM
+}
+
+enum VehicleStatus {
+  AVAILABLE
+  RESERVED
+  SOLD
+  ARCHIVED
+}
+
+// ============================ CORE: USERS / AUTH ============================
+
+model User {
+  id              String    @id @default(uuid()) @db.Uuid
+  email           String    @unique
+  passwordHash    String    @map("password_hash")
+  firstName       String    @map("first_name")
+  lastName        String    @map("last_name")
+  phone           String?
+  avatarUrl       String?   @map("avatar_url")
+  role            UserRole  @default(ASESOR)
+  isActive        Boolean   @default(true) @map("is_active")
+  lastLoginAt     DateTime? @map("last_login_at")
+  supabaseUserId  String?   @unique @map("supabase_user_id") @db.Uuid
+
+  createdAt       DateTime  @default(now()) @map("created_at")
+  updatedAt       DateTime  @updatedAt @map("updated_at")
+  deletedAt       DateTime? @map("deleted_at")
+
+  refreshTokens   RefreshToken[]
+  leadsOwned      Lead[]            @relation("LeadOwner")
+  leadsCreated    Lead[]            @relation("LeadCreator")
+  messagesSent    Message[]
+  activities      Activity[]
+  notifications   Notification[]
+  auditLogs       AuditLog[]
+  conversationAssignments Conversation[] @relation("ConversationAssignee")
+
+  @@index([role])
+  @@index([isActive])
+  @@map("users")
+}
+
+model RefreshToken {
+  id          String    @id @default(uuid()) @db.Uuid
+  userId      String    @map("user_id") @db.Uuid
+  tokenHash   String    @map("token_hash")
+  userAgent   String?   @map("user_agent")
+  ipAddress   String?   @map("ip_address")
+  expiresAt   DateTime  @map("expires_at")
+  revokedAt   DateTime? @map("revoked_at")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  user        User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([tokenHash])
+  @@map("refresh_tokens")
+}
+
+// ============================ LEADS ============================
+
+model Lead {
+  id              String        @id @default(uuid()) @db.Uuid
+  fullName        String        @map("full_name")
+  email           String?
+  phone           String?       @unique
+  documentId      String?       @map("document_id")
+  source          LeadSource    @default(OTHER)
+  status          LeadStatus    @default(NEW)
+  priority        LeadPriority  @default(MEDIUM)
+  score           Int           @default(0)
+  budgetMin       Decimal?      @map("budget_min") @db.Decimal(12, 2)
+  budgetMax       Decimal?      @map("budget_max") @db.Decimal(12, 2)
+  city            String?
+  notes           String?       @db.Text
+  tags            String[]      @default([])
+  utm             Json?         // utm_source, utm_medium, utm_campaign...
+  customFields    Json?         @map("custom_fields")
+
+  ownerId         String?       @map("owner_id") @db.Uuid
+  createdById     String?       @map("created_by_id") @db.Uuid
+  pipelineStageId String?       @map("pipeline_stage_id") @db.Uuid
+  vehicleInterestId String?     @map("vehicle_interest_id") @db.Uuid
+
+  createdAt       DateTime      @default(now()) @map("created_at")
+  updatedAt       DateTime      @updatedAt @map("updated_at")
+  lastContactAt   DateTime?     @map("last_contact_at")
+  closedAt        DateTime?     @map("closed_at")
+  deletedAt       DateTime?     @map("deleted_at")
+
+  owner           User?         @relation("LeadOwner", fields: [ownerId], references: [id], onDelete: SetNull)
+  createdBy       User?         @relation("LeadCreator", fields: [createdById], references: [id], onDelete: SetNull)
+  pipelineStage   PipelineStage? @relation(fields: [pipelineStageId], references: [id], onDelete: SetNull)
+  vehicleInterest Vehicle?      @relation(fields: [vehicleInterestId], references: [id], onDelete: SetNull)
+  conversations   Conversation[]
+  activities      Activity[]
+
+  @@index([status])
+  @@index([priority])
+  @@index([ownerId])
+  @@index([source])
+  @@index([createdAt])
+  @@index([pipelineStageId])
+  @@map("leads")
+}
+
+// ============================ PIPELINE ============================
+
+model PipelineStage {
+  id          String     @id @default(uuid()) @db.Uuid
+  name        String
+  slug        String     @unique
+  description String?
+  order       Int
+  color       String?    // hex color para UI
+  isWon       Boolean    @default(false) @map("is_won")
+  isLost      Boolean    @default(false) @map("is_lost")
+  isActive    Boolean    @default(true) @map("is_active")
+
+  createdAt   DateTime   @default(now()) @map("created_at")
+  updatedAt   DateTime   @updatedAt @map("updated_at")
+
+  leads       Lead[]
+
+  @@index([order])
+  @@map("pipeline_stages")
+}
+
+// ============================ CONVERSATIONS / MESSAGES ============================
+
+model Conversation {
+  id              String       @id @default(uuid()) @db.Uuid
+  channel         ChannelType
+  externalId      String       @map("external_id") // e.g. WhatsApp wa_id, IG thread id
+  leadId          String?      @map("lead_id") @db.Uuid
+  assignedToId    String?      @map("assigned_to_id") @db.Uuid
+  isOpen          Boolean      @default(true) @map("is_open")
+  unreadCount     Int          @default(0) @map("unread_count")
+  lastMessageAt   DateTime?    @map("last_message_at")
+  metadata        Json?
+
+  createdAt       DateTime     @default(now()) @map("created_at")
+  updatedAt       DateTime     @updatedAt @map("updated_at")
+  closedAt        DateTime?    @map("closed_at")
+
+  lead            Lead?        @relation(fields: [leadId], references: [id], onDelete: SetNull)
+  assignedTo      User?        @relation("ConversationAssignee", fields: [assignedToId], references: [id], onDelete: SetNull)
+  messages        Message[]
+
+  @@unique([channel, externalId])
+  @@index([leadId])
+  @@index([assignedToId])
+  @@index([isOpen])
+  @@index([lastMessageAt])
+  @@map("conversations")
+}
+
+model Message {
+  id              String           @id @default(uuid()) @db.Uuid
+  conversationId  String           @map("conversation_id") @db.Uuid
+  direction       MessageDirection
+  type            MessageType      @default(TEXT)
+  status          MessageStatus    @default(PENDING)
+  body            String?          @db.Text
+  mediaUrl        String?          @map("media_url")
+  mediaType       String?          @map("media_type")
+  externalId      String?          @map("external_id") // id en WhatsApp/IG
+  senderUserId    String?          @map("sender_user_id") @db.Uuid
+  raw             Json?            // payload completo del webhook
+  errorMessage    String?          @map("error_message")
+
+  createdAt       DateTime         @default(now()) @map("created_at")
+  deliveredAt     DateTime?        @map("delivered_at")
+  readAt          DateTime?        @map("read_at")
+
+  conversation    Conversation     @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  sender          User?            @relation(fields: [senderUserId], references: [id], onDelete: SetNull)
+
+  @@index([conversationId, createdAt])
+  @@index([externalId])
+  @@index([direction])
+  @@index([status])
+  @@map("messages")
+}
+
+// ============================ VEHICLES ============================
+
+model Vehicle {
+  id          String         @id @default(uuid()) @db.Uuid
+  make        String         // Marca: Toyota, Chevrolet...
+  model       String
+  year        Int
+  trim        String?
+  vin         String?        @unique
+  plate       String?
+  color       String?
+  mileage     Int?
+  price       Decimal        @db.Decimal(12, 2)
+  currency    String         @default("USD")
+  description String?        @db.Text
+  images      String[]       @default([])
+  status      VehicleStatus  @default(AVAILABLE)
+  features    Json?
+
+  createdAt   DateTime       @default(now()) @map("created_at")
+  updatedAt   DateTime       @updatedAt @map("updated_at")
+  deletedAt   DateTime?      @map("deleted_at")
+
+  interestedLeads Lead[]
+
+  @@index([make, model])
+  @@index([status])
+  @@index([price])
+  @@map("vehicles")
+}
+
+// ============================ ACTIVITIES ============================
+
+model Activity {
+  id          String        @id @default(uuid()) @db.Uuid
+  leadId      String        @map("lead_id") @db.Uuid
+  userId      String?       @map("user_id") @db.Uuid
+  type        ActivityType
+  title       String
+  description String?       @db.Text
+  scheduledAt DateTime?     @map("scheduled_at")
+  completedAt DateTime?     @map("completed_at")
+  metadata    Json?
+
+  createdAt   DateTime      @default(now()) @map("created_at")
+  updatedAt   DateTime      @updatedAt @map("updated_at")
+
+  lead        Lead          @relation(fields: [leadId], references: [id], onDelete: Cascade)
+  user        User?         @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([leadId, createdAt])
+  @@index([userId])
+  @@index([type])
+  @@index([scheduledAt])
+  @@map("activities")
+}
+
+// ============================ NOTIFICATIONS ============================
+
+model Notification {
+  id          String            @id @default(uuid()) @db.Uuid
+  userId      String            @map("user_id") @db.Uuid
+  type        NotificationType
+  title       String
+  body        String?           @db.Text
+  link        String?
+  isRead      Boolean           @default(false) @map("is_read")
+  data        Json?
+
+  createdAt   DateTime          @default(now()) @map("created_at")
+  readAt      DateTime?         @map("read_at")
+
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, isRead])
+  @@index([createdAt])
+  @@map("notifications")
+}
+
+// ============================ AUDIT LOGS ============================
+
+model AuditLog {
+  id          String   @id @default(uuid()) @db.Uuid
+  userId      String?  @map("user_id") @db.Uuid
+  action      String   // e.g. "lead.updated", "user.login"
+  entity      String   // e.g. "Lead"
+  entityId    String?  @map("entity_id")
+  changes     Json?    // diff before/after
+  ipAddress   String?  @map("ip_address")
+  userAgent   String?  @map("user_agent")
+
+  createdAt   DateTime @default(now()) @map("created_at")
+
+  user        User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([entity, entityId])
+  @@index([createdAt])
+  @@map("audit_logs")
+}
